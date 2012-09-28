@@ -2,7 +2,7 @@
 
 	require("settings.php"); //Loads in the api keys
 	
-	require("../phpOSM.php");
+	require("../phpOSM.php"); //Load in the phpOSM class
 
 	
 	//Load phpOSM class
@@ -19,7 +19,7 @@
 	 * 
 	 * If your API is being used by others, please tell them to do this!
 	 */
-	$user = $osm->authorise($user_email, $user_password);
+	//$user = $osm->authorise($user_email, $user_password);
 	
 	print_r($user);
 

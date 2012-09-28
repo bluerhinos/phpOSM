@@ -9,7 +9,7 @@
 /*
 	Licence
 
-	Copyright (c) 2011 Blue Rhinos Consulting | Andrew Milsted
+	Copyright (c) 2012 Blue Rhinos Consulting | Andrew Milsted
 	andrew@bluerhinos.co.uk | http://www.bluerhinos.co.uk
 
 	Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -97,9 +97,10 @@ class phpOSM{
 		
 		$this->debug_msg("Starting Query {$url}");
 
-		if(isset($cachekey)){
+
+		if($this->usecache && isset($cachekey)){
   			$cachefile = "{$this->cache}$cachekey";
-			if($this->usecache && file_exists($cachefile)){
+			if(file_exists($cachefile)){
 					$this->debug_msg("Cache file exists - {$cachefile}");
 					$cachefileage = time() - filemtime($cachefile);
 					$this->debug_msg("Cache is {$cachefileage}s old, Limit is $cachetime");
@@ -110,22 +111,29 @@ class phpOSM{
 			}else{
 					$this->debug_msg("Cache file does not exists - {$cachefile}");
 			}
-			
 		}
 	    $curl_handle = curl_init();
 	    curl_setopt($curl_handle, CURLOPT_URL, $this->url.$url);
 	    curl_setopt($curl_handle, CURLOPT_POSTFIELDS, http_build_query(array_merge($params,$this->baseparam)));
 	    curl_setopt($curl_handle, CURLOPT_POST, 1);
-	    curl_setopt($curl_handle, CURLOPT_CONNECTTIMEOUT, 2);
+	    curl_setopt($curl_handle, CURLOPT_CONNECTTIMEOUT, 10);
 	    curl_setopt($curl_handle, CURLOPT_RETURNTRANSFER, 1);
 	    $msg = curl_exec($curl_handle);
+		$curl_errno = curl_errno($curl_handle);
+	    $curl_error = curl_error($curl_handle);
+		if($curl_errno>0){
+			die("Curl Error: ({$curl_errno}) {$curl_error}\n");
+		}
 
-
-		if(isset($cachekey)){
+		if(!$ret = json_decode($msg))
+			die("OSM Error $cachekey: {$msg}\n");
+			
+		if($this->usecache && isset($cachekey)){
 			$this->debug_msg("Saving to cache - {$cachefile}");
 			file_put_contents($cachefile,$msg);
 		}
-	    return json_decode($msg);    
+		
+	    return $ret;    
 	}
 	
 	function getUserRoles(){
@@ -154,8 +162,8 @@ class phpOSM{
 	// List of badges and the data I have in the database for them - some things won't be relevant for APIs
 	//badgeType = challenge/staged/activity
 	
-	function getBadges($type = "challenge"){
-		$this->badges[$type] = $this->query("challenges.php?action=getBadgeDetails&section=scouts&badgeType=$type", array()); 	
+	function getBadges($section = "scouts", $type = "challenge"){
+		return $this->badges[$section][$type] = $this->query("challenges.php?action=getBadgeDetails&section={$section}&badgeType=$type", array(), "getBadgeDetails-$section-$type", TIME_ONE_DAY); 	
 	}
 	
 	function getScoutDetails(){
@@ -164,11 +172,11 @@ class phpOSM{
 	}
 	
 	function getFlexiRecord($flexid){
-		return $this->query("extras.php?action=getExtraRecords&extraid={$flexid}&sectionid={$this->section}&termid={$this->term}",array(),"getFlexiRecord-{$this->section}-{$this->term}-{$flexid}",5);
+		return $this->query("extras.php?action=getExtraRecords&extraid={$flexid}&sectionid={$this->section}&termid={$this->term}",array(),"getFlexiRecord-{$this->section}-{$this->term}-{$flexid}",TIME_ONE_HOUR);
 	}
 	
 	function getFlexiRecordDetails($flexid){
-		return $this->query("extras.php?action=getExtra&sectionid={$this->section}&extraid={$flexid}",array(),"getFlexiRecordDetails-{$this->section}-{$this->term}-{$flexid}",5);
+		return $this->query("extras.php?action=getExtra&sectionid={$this->section}&extraid={$flexid}",array(),"getFlexiRecordDetails-{$this->section}-{$this->term}-{$flexid}",TIME_ONE_HOUR);
 	}
 	
 	function sortScoutDetails($key){
