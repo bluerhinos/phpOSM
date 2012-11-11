@@ -41,7 +41,7 @@ define( "TIME_ONE_YEAR", 31556926);
 
 class phpOSM{
 	
-	private $url = "https://www.onlinescoutmanager.co.uk/";
+	public $url = "https://www.onlinescoutmanager.co.uk/";
 	private $apiid;
 	private $token;
 	private $userid;
@@ -57,6 +57,12 @@ class phpOSM{
 	public $section;
 	public $term;
 	
+	public $dateformat = 'uk';
+	
+	public $dateformats = array("uk"=>"d/m/Y");
+	
+	
+	public $whichsection = "scouts";
 	
 	function __construct($apiid, $token){
 		$this->register($apiid, $token);
@@ -93,7 +99,20 @@ class phpOSM{
 		$this->baseparam['secret'] = $secret;
 	}
 	
-	function query($url, $params = array(), $cachekey = NULL, $cachetime = 0) {
+	function decodeQuery(&$msg, $type){
+			switch($type){
+			case "json":
+				if(!$ret = json_decode($msg))
+					die("OSM Error $cachekey: {$msg}\n");
+					return $ret;
+			break;
+			default:
+				return $msg;
+			break;
+			}
+	}
+	
+	function query($url, $params = array(), $cachekey = NULL, $cachetime = 0, $type = "json") {
 		
 		$this->debug_msg("Starting Query {$url}");
 
@@ -106,7 +125,7 @@ class phpOSM{
 					$this->debug_msg("Cache is {$cachefileage}s old, Limit is $cachetime");
 					if($cachetime > $cachefileage){
 						$msg = file_get_contents($cachefile);
-						return json_decode($msg); 
+						return $this->decodeQuery($msg,$type); 
 					}		
 			}else{
 					$this->debug_msg("Cache file does not exists - {$cachefile}");
@@ -125,8 +144,7 @@ class phpOSM{
 			die("Curl Error: ({$curl_errno}) {$curl_error}\n");
 		}
 
-		if(!$ret = json_decode($msg))
-			die("OSM Error $cachekey: {$msg}\n");
+		$ret = $this->decodeQuery($msg,$type);
 			
 		if($this->usecache && isset($cachekey)){
 			$this->debug_msg("Saving to cache - {$cachefile}");
@@ -167,7 +185,7 @@ class phpOSM{
 	}
 	
 	function getScoutDetails(){
-		$this->scoutDetails = $this->query("users.php?action=getUserDetails&sectionid={$this->section}&termid={$this->term}",array(),"getUserDetails-{$this->section}-{$this->term}",TIME_ONE_HOUR);	
+		$this->scoutDetails = $this->query("users.php?action=getUserDetails&sectionid={$this->section}&termid={$this->term}&dateFormat={$this->dateformat}&section={$this->whichsection}",array(),"getUserDetails-{$this->section}-{$this->term}-{$this->dateformat}-{$this->whichsection}",TIME_ONE_HOUR);	
 	
 	}
 	
@@ -187,6 +205,90 @@ class phpOSM{
 	function _objectSort($a,$b){
 		    return strcmp($a->{$this->_objectSortKey},$b->{$this->_objectSortKey});
 	}
+	
+	function individualRecord($scoutid){
+		return $this->query("challenges.php?action=individualRecords&sectionid={$this->section}&scouts={$scoutid},&section={$this->whichsection}",array(),"individualRecords-{$this->section}-{$scoutid}-{$this->whichsection}",TIME_ONE_HOUR,"pdf");
+	}
+	
+	function getFinanceCategories(){
+		return $this->query("finances.php?action=getCategories&sectionid={$this->section}",array(), "getCategories-{$this->section}",TIME_ONE_DAY);
+	}
+	
+	function getFinanceInvoices(){
+		return $this->query("finances.php?action=getInvoices&sectionid={$this->section}", array(),"getInvoices-{$this->section}", TIME_ONE_HOUR);
+	}
+	
+	
+	function getFinanceInvoiceRecords($invoice){
+		return $this->query("finances.php?action=getInvoiceRecords&sectionid={$this->section}&invoiceid=$invoice&dateFormat={$this->dateformat}", array(), "getInvoiceRecords-{$this->section}-$invoice-{$this->dateformat}", TIME_ONE_HOUR);
+	}
+	
+	function getFinanceInvoice($invoice){
+		return $this->query("finances.php?action=getInvoice&sectionid={$this->section}&invoiceid=$invoice", array(), "getInvoice-{$this->section}-$invoice", TIME_ONE_HOUR);
+	}
+	
+	function addFinanceRecord($invoice){
+		$res = $this->query("finances.php?action=addRecord&sectionid={$this->section}&invoiceid=$invoice", array());
+		if($res->ok!="true") return false;
+		$this->clearCache("getInvoiceRecords-{$this->section}-{$invoice}-*");
+		$bit = $this->getFinanceInvoiceRecords($invoice);
+		return end($bit->items);
+	}
+	
+	function updateFinanceRecord($invoice, $recordid, $column, $value){
+		$post['recordid'] = $recordid;
+		$post['column'] = $column;
+		$post['value'] = $value;
+		$post['row'] = $post['recordid']-1;
+		$post['invoiceid'] = $invoice;
+		$post['sectionid'] = $this->section;
+
+		$res = $this->query("finances.php?action=updateRecord&sectionid={$this->section}&dateFormat={$this->dateformat}", $post);
+		return $res;
+	}
+	
+	function addFinanceRecordPlus($invoice,$amount,$comments,$date=NULL,$type=NULL,$budget=NULL,$pay=NULL){
+		$line = $this->addFinanceRecord($invoice);
+	
+		$this->updateFinanceRecord($invoice, $line->recordid, "amount", $amount);
+		$last =	$this->updateFinanceRecord($invoice, $line->recordid, "comments", $comments);
+		if($date)
+		$last =	$this->updateFinanceRecord($invoice, $line->recordid, "entrydate", $date);
+		if($type)
+		$last =	$this->updateFinanceRecord($invoice, $line->recordid, "type", $type);
+		if($budget)
+		$last =	$this->updateFinanceRecord($invoice, $line->recordid, "categoryid", $budget);
+		if($pay)
+		$last =	$this->updateFinanceRecord($invoice, $line->recordid, "payto_userid", $pay);
+		
+		return $last;	
+		
+	}
+
+	function clearCache($cache){
+		$cache = preg_replace("/[^a-zA-Z0-9\-\*]/","",$cache);
+		$cache = $this->cache.$cache;
+	 	$exec = "rm -f {$cache}";
+		`$exec`;
+	}
+	
+	function responseToOneArray(&$items,$key, $resp = array()){
+
+		foreach($items->items as $item){
+			$resp[$item->{$items->identifier}] = $item->{$key}; 
+		}
+		return $resp;
+	}
+	
+	
+	function responseToArray(&$items){
+		$resp = array();
+		foreach($items->items as $item){
+			$resp[$item->{$items->identifier}] = get_object_vars($item); 
+		}
+		return $resp;
+	}
+	
 	
 }
 
